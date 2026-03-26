@@ -242,7 +242,7 @@ def test_github_issue_body_intent_fallback():
         assert context.contributor_intent == "Purpose: tighten session handling"
         assert context.issue_labels == ["security"]
 
-        print("âœ“ GitHub issue-body fallback test passed")
+        print("✓ GitHub issue-body fallback test passed")
     finally:
         if original_event_path is None:
             os.environ.pop("GITHUB_EVENT_PATH", None)
