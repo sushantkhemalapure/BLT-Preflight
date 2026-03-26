@@ -5,8 +5,13 @@ Fetches PR context from GitHub and provides advisory feedback.
 
 import os
 import json
+import logging
+import tempfile
 from typing import Dict, List, Optional
 from .core import AdvisoryEngine, AdvisoryContext
+
+
+logger = logging.getLogger(__name__)
 
 
 class GitHubIntegration:
@@ -21,10 +26,15 @@ class GitHubIntegration:
     def get_pr_context(self) -> Optional[AdvisoryContext]:
         """Extract context from GitHub PR event."""
         if not os.path.exists(self.event_path):
+            logger.warning("GitHub event payload not found: %s", self.event_path)
             return None
-        
-        with open(self.event_path, 'r') as f:
-            event_data = json.load(f)
+
+        try:
+            with open(self.event_path, 'r', encoding='utf-8') as f:
+                event_data = json.load(f)
+        except json.JSONDecodeError:
+            logger.exception("GitHub event payload is not valid JSON: %s", self.event_path)
+            return None
         
         # Extract PR information
         pr = event_data.get('pull_request', {})
@@ -46,8 +56,8 @@ class GitHubIntegration:
             'title': pr.get('title', issue.get('title', ''))
         }
         
-        # Check for intent in PR description
-        intent = self._extract_intent(pr.get('body', ''))
+        # Fall back to issue body when PR body is unavailable.
+        intent = self._extract_intent(pr.get('body') or issue.get('body', ''))
         
         return AdvisoryContext(
             issue_labels=labels,
@@ -93,12 +103,16 @@ class GitHubIntegration:
         """Post advisory as a PR comment."""
         # This would use GitHub API in production
         # For now, we'll write to a file for the action to handle
-        output_file = os.environ.get('GITHUB_OUTPUT', '/tmp/advisory_output.md')
+        output_file = os.environ.get('GITHUB_OUTPUT') or os.path.join(
+            tempfile.gettempdir(),
+            'advisory_output.md'
+        )
         
         try:
-            with open(output_file, 'w') as f:
+            with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(advisory_report)
+            logger.info("Advisory output written to %s", output_file)
             return True
         except Exception as e:
-            print(f"Error writing advisory output: {e}")
+            logger.exception("Error writing advisory output to %s: %s", output_file, e)
             return False

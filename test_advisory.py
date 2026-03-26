@@ -5,12 +5,15 @@ Test script for BLT Preflight Advisory Engine
 
 import sys
 import os
+import json
+import tempfile
 
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from advisory_engine.core import AdvisoryEngine, AdvisoryContext, SecurityAdvice
 from advisory_engine.dashboard import MaintainerDashboard
+from advisory_engine.github_integration import GitHubIntegration
 
 
 def test_advisory_generation():
@@ -206,6 +209,54 @@ def test_pf_check_command():
 
     print("✓ pf (no args) exits 0 when no staged files")
 
+def test_github_issue_body_intent_fallback():
+    """Test fallback to issue body when PR body is missing."""
+    print("\nTesting GitHub issue-body fallback...")
+
+    original_event_path = os.environ.get("GITHUB_EVENT_PATH")
+    original_repo = os.environ.get("GITHUB_REPOSITORY")
+    event_path = None
+
+    try:
+        with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8", suffix=".json") as tmp:
+            json.dump(
+                {
+                    "issue": {
+                        "number": 42,
+                        "title": "Harden login flow",
+                        "body": "Purpose: tighten session handling",
+                        "labels": [{"name": "security"}]
+                    }
+                },
+                tmp
+            )
+            event_path = tmp.name
+
+        os.environ["GITHUB_EVENT_PATH"] = event_path
+        os.environ["GITHUB_REPOSITORY"] = "OWASP-BLT/BLT"
+
+        integration = GitHubIntegration()
+        context = integration.get_pr_context()
+
+        assert context is not None, "Should build context from issue payload"
+        assert context.contributor_intent == "Purpose: tighten session handling"
+        assert context.issue_labels == ["security"]
+
+        print("âœ“ GitHub issue-body fallback test passed")
+    finally:
+        if original_event_path is None:
+            os.environ.pop("GITHUB_EVENT_PATH", None)
+        else:
+            os.environ["GITHUB_EVENT_PATH"] = original_event_path
+
+        if original_repo is None:
+            os.environ.pop("GITHUB_REPOSITORY", None)
+        else:
+            os.environ["GITHUB_REPOSITORY"] = original_repo
+
+        if event_path and os.path.exists(event_path):
+            os.unlink(event_path)
+
 
 def main():
     """Run all tests."""
@@ -221,6 +272,7 @@ def main():
         test_dashboard()
         test_pattern_matching()
         test_pf_check_command()
+        test_github_issue_body_intent_fallback()
         
         print("\n" + "=" * 60)
         print("✅ All tests passed!")
